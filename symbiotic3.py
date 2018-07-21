@@ -90,22 +90,44 @@ def apply_organisms(x, organisms):
         x += layer_bias
     return x
 
+def create_evolve_data(organisms, is_evolve):
+    n_organisms = organisms[0][0].shape[0]
+    is_evolve_factor = (-1 if is_evolve else 1)
+
+    data = []
+    for layer_index, (layer_weight, layer_bias) in enumerate(organisms):
+        layer_weight = layer_weight.reshape((n_organisms, -1, 1, 1))
+        weight_factor = is_evolve_factor*(1 + layer_index)*2
+        weight = weight_factor*np.ones_like(layer_weight)
+        data.append(weight.reshape((n_organisms, -1, 1, 1)))
+
+        layer_bias = layer_bias.reshape((n_organisms, -1, 1, 1))
+        bias_factor = weight_factor + is_evolve_factor
+        bias = bias_factor*np.ones_like(layer_bias)
+        data.append(bias.reshape((n_organisms, -1, 1, 1)))
+
+    return np.concatenate(data, axis=1)
+
 def evolve(problem_organisms, evolve_organisms):
-    # was stronger when this was set to 1
     n_organisms = problem_organisms[0][0].shape[0]
-    
-    flat_problem_organisms = flatten_organisms(problem_organisms) 
+    decay_factor = 0.999
+    minimum_scale = 1e-10
+
+    flat_problem_organisms = flatten_organisms(problem_organisms)
     flat_evolve_organisms = flatten_organisms(evolve_organisms)
 
-    evolve_scale = softplus(apply_organisms(np.ones((n_organisms, 1, 1, 1)), evolve_organisms))
-    evolve_scale = evolve_scale.reshape((-1, 1))
-    evolve_scale = evolve_scale*np.ones_like(flat_evolve_organisms)
+    evolve_data = create_evolve_data(evolve_organisms, is_evolve=True)
+    evolve_scale = softplus(apply_organisms(evolve_data, evolve_organisms)) + minimum_scale
+    evolve_scale = evolve_scale.reshape((n_organisms, -1))
+    print(evolve_scale.mean())
     child_evolve_organisms = np.random.normal(loc=flat_evolve_organisms, scale=evolve_scale, size=flat_evolve_organisms.shape)
+    child_evolve_organisms = child_evolve_organisms*decay_factor
     child_evolve_organisms = reshape_organisms(child_evolve_organisms, size_from_organisms(evolve_organisms))
 
-    problem_scale = softplus(apply_organisms(np.zeros((n_organisms, 1, 1, 1)), child_evolve_organisms))
-    problem_scale = problem_scale.reshape((-1, 1))
-    problem_scale = problem_scale*np.ones_like(flat_problem_organisms)
+    evolve_data = create_evolve_data(problem_organisms, is_evolve=False)
+    problem_scale = softplus(apply_organisms(evolve_data, child_evolve_organisms)) + minimum_scale
+    problem_scale = problem_scale.reshape((n_organisms, -1))
+    print(problem_scale.mean())
     child_problem_organisms = np.random.normal(loc=flat_problem_organisms, scale=problem_scale, size=flat_problem_organisms.shape)
     child_problem_organisms = reshape_organisms(child_problem_organisms, size_from_organisms(problem_organisms))
 
@@ -140,7 +162,7 @@ def calculate_loss(X, y, problem_organisms):
 #    return x1*x2
 
 def problem(x1, x2):
-    return x1*np.square(x2)
+    return np.square(x1)*np.square(x2)
 
 def generate_data(n_problems):
     # n_organisms, n_problems, 1 x n_inputs (row vector)
@@ -167,7 +189,7 @@ def main():
         [problem_layer_size for _ in range(3)] + 
         [y.shape[-1]]
     )
-    evolve_organism_size = [1, 1]
+    evolve_organism_size = [1, 5, 1]
     # Need to compress input. A RNN or just take in compressed input
 
     problem_organisms = init_organisms(n_organisms, problem_organism_size)
@@ -176,7 +198,7 @@ def main():
     iteration_loss = []
     for iteration in range(n_iterations):
 
-        # X, y = generate_data(n_problems)
+        #X, y = generate_data(n_problems)
 
         loss_value = calculate_loss(X, y, problem_organisms)
         iteration_loss.append(loss_value.min())
